@@ -53,6 +53,8 @@ test("verifies the public signed pointer and immutable release bytes", async () 
   assert.equal(requests.length, 2);
   assert.equal(requests[0].init.cache, "no-store");
   assert.equal(requests[0].init.credentials, "omit");
+  assert.ok(requests[0].init.signal instanceof AbortSignal);
+  assert.ok(requests[1].init.signal instanceof AbortSignal);
   assert.equal(requests[1].url, data.payload.artifact.url);
 });
 

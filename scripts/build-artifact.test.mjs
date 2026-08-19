@@ -42,6 +42,8 @@ test("rejects unsafe ZIP entry names", () => {
     "assets/.hidden",
     "__MACOSX/file",
     ".DS_Store",
+    "assets/app.js\nindex.html",
+    "assets/app\u0000.js",
   ]) {
     assert.throws(() => validateZipEntryNames([entry]), entry);
   }

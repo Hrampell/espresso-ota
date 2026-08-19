@@ -11,7 +11,9 @@ const MAX_FILES = 5_000;
 function validateRelativePath(relativePath) {
   const segments = relativePath.split("/");
   if (
-    relativePath.startsWith("/")
+    /[\u0000-\u001F\u007F]/u.test(relativePath)
+    || relativePath.length > 512
+    || relativePath.startsWith("/")
     || relativePath.includes("\\")
     || segments.some((segment) => segment === "" || segment === "." || segment === ".." || segment.startsWith("."))
     || segments.includes("__MACOSX")
@@ -93,7 +95,13 @@ async function main() {
     process.stdout.write(`${JSON.stringify(await createArtifactReceipt(firstPath))}\n`);
     return;
   }
-  throw new Error("Usage: build-artifact.mjs stage <dist> <stage> | receipt <zip>");
+  if (command === "validate-entries" && firstPath) {
+    const text = await fs.readFile(firstPath, "utf8");
+    if (!text.endsWith("\n")) throw new Error("Entry list must end with a newline");
+    validateZipEntryNames(text.slice(0, -1).split("\n"));
+    return;
+  }
+  throw new Error("Usage: build-artifact.mjs stage <dist> <stage> | receipt <zip> | validate-entries <file>");
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

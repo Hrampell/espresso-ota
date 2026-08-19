@@ -8,6 +8,16 @@ import {
   verifySignedEnvelope,
 } from "./lib/contract.mjs";
 
+async function fetchWithDeadline(fetcher, url, init, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("Publication request timed out")), timeoutMs);
+  try {
+    return await fetcher(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function readBounded(response, maximumBytes) {
   if (!response.ok || response.status !== 200) throw new Error(`Unexpected HTTP status ${response.status}`);
   const length = response.headers.get("content-length");
@@ -50,17 +60,17 @@ export async function verifyPublication({ manifestUrl, publicKeySpkiBase64, fetc
     redirect: "error",
     referrerPolicy: "no-referrer",
   };
-  const manifestResponse = await fetcher(manifestUrl, manifestRequestInit);
+  const manifestResponse = await fetchWithDeadline(fetcher, manifestUrl, manifestRequestInit, 15_000);
   const manifestContentType = manifestResponse.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   if (manifestContentType !== "application/json") throw new Error("Manifest content type is invalid");
   const manifestBytes = await readBounded(manifestResponse, OTA_MAX_MANIFEST_BYTES);
   const envelope = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(manifestBytes));
   const payload = verifySignedEnvelope({ envelope, publicKeySpkiBase64 });
 
-  const artifactResponse = await fetcher(payload.artifact.url, {
+  const artifactResponse = await fetchWithDeadline(fetcher, payload.artifact.url, {
     ...manifestRequestInit,
     redirect: "follow",
-  });
+  }, 60_000);
   const artifactBytes = await readBounded(artifactResponse, OTA_MAX_ARTIFACT_BYTES);
   if (artifactBytes.byteLength !== payload.artifact.sizeBytes) throw new Error("Artifact size mismatch");
   const digest = createHash("sha256").update(artifactBytes).digest("hex");
