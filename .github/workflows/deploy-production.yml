@@ -1,0 +1,224 @@
+name: Deploy signed production OTA
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact 40-character commit from Hrampell/espressoshotlogapp main
+        required: true
+        type: string
+      sequence:
+        description: Strictly increasing production sequence
+        required: true
+        type: string
+      bundle_version:
+        description: Exact value such as 1.3.3-ota.1
+        required: true
+        type: string
+      kind:
+        description: Allowed web-only change category
+        required: true
+        type: choice
+        options:
+          - bugfix
+          - style
+          - copy
+          - asset
+      note:
+        description: Short printable deployment note
+        required: true
+        type: string
+      confirm:
+        description: Type DEPLOY to authorize this production pointer change
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: espresso-ota-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the OTA publisher
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.14.0
+
+      - name: Validate explicit deployment inputs and sequence
+        env:
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
+          INPUT_SEQUENCE: ${{ inputs.sequence }}
+          INPUT_BUNDLE_VERSION: ${{ inputs.bundle_version }}
+          INPUT_KIND: ${{ inputs.kind }}
+          INPUT_NOTE: ${{ inputs.note }}
+          INPUT_CONFIRM: ${{ inputs.confirm }}
+        run: node scripts/validate-deployment.mjs config/native-baselines.json v1/production.json
+
+      - name: Check out the exact private app source
+        env:
+          APP_REPO_DEPLOY_KEY: ${{ secrets.APP_REPO_DEPLOY_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test -n "$APP_REPO_DEPLOY_KEY"
+          install -m 700 -d "$HOME/.ssh"
+          install -m 600 /dev/null "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$APP_REPO_DEPLOY_KEY" > "$HOME/.ssh/id_ed25519"
+          gh api meta --jq '.ssh_keys[]' > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          git clone --filter=blob:none --no-checkout git@github.com:Hrampell/espressoshotlogapp.git app
+          git -C app fetch --no-tags origin main "$INPUT_SOURCE_SHA"
+          git -C app checkout --detach "$INPUT_SOURCE_SHA"
+
+      - name: Prove the source is OTA eligible
+        env:
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          BASELINE_COMMIT="$(node -p "require('./config/native-baselines.json').baselineCommit")"
+          git -C app fetch --no-tags origin "$BASELINE_COMMIT"
+          git -C app merge-base --is-ancestor "$BASELINE_COMMIT" "$INPUT_SOURCE_SHA"
+          git -C app merge-base --is-ancestor "$INPUT_SOURCE_SHA" origin/main
+          git -C app diff --name-only -z "$BASELINE_COMMIT" "$INPUT_SOURCE_SHA" > "$RUNNER_TEMP/changed-paths.bin"
+          node scripts/validate-source.mjs "$RUNNER_TEMP/changed-paths.bin"
+
+      - name: Test and build the exact app source
+        working-directory: app
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+          npx tsc -p tsconfig.app.json --noEmit
+          npm run build
+
+      - name: Build a deterministic bounded bundle
+        env:
+          INPUT_BUNDLE_VERSION: ${{ inputs.bundle_version }}
+        run: |
+          set -euo pipefail
+          STAGE="$RUNNER_TEMP/ota-stage"
+          ARTIFACT="espresso-shot-log-$INPUT_BUNDLE_VERSION.zip"
+          node scripts/build-artifact.mjs stage app/dist "$STAGE"
+          (
+            cd "$STAGE"
+            find . -type f -printf '%P\n' | LC_ALL=C sort > "$RUNNER_TEMP/zip-entries.txt"
+            node "$GITHUB_WORKSPACE/scripts/build-artifact.mjs" validate-entries "$RUNNER_TEMP/zip-entries.txt"
+            zip -X -q "$GITHUB_WORKSPACE/$ARTIFACT" -@ < "$RUNNER_TEMP/zip-entries.txt"
+          )
+          node scripts/build-artifact.mjs receipt "$ARTIFACT" > "$RUNNER_TEMP/artifact-receipt.json"
+
+      - name: Create and self-verify the signed manifest
+        env:
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
+          INPUT_SEQUENCE: ${{ inputs.sequence }}
+          INPUT_BUNDLE_VERSION: ${{ inputs.bundle_version }}
+          INPUT_KIND: ${{ inputs.kind }}
+          INPUT_NOTE: ${{ inputs.note }}
+          INPUT_CONFIRM: ${{ inputs.confirm }}
+          OTA_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.OTA_SIGNING_PRIVATE_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          PUBLIC_KEY="$(node -p "require('./config/native-baselines.json').publicKeySpkiBase64")"
+          node scripts/create-payload.mjs "$RUNNER_TEMP/artifact-receipt.json" "$RUNNER_TEMP/payload.json"
+          node scripts/create-manifest.mjs "$RUNNER_TEMP/payload.json" "$RUNNER_TEMP/signed-manifest.json" "$PUBLIC_KEY"
+
+      - name: Publish and verify immutable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_BUNDLE_VERSION: ${{ inputs.bundle_version }}
+          INPUT_NOTE: ${{ inputs.note }}
+        run: |
+          set -euo pipefail
+          TAG="ota-$INPUT_BUNDLE_VERSION"
+          ARTIFACT="espresso-shot-log-$INPUT_BUNDLE_VERSION.zip"
+          SIGNED_MANIFEST="$RUNNER_TEMP/signed-manifest.json"
+          gh release view "$TAG" --repo Hrampell/espresso-ota >/dev/null 2>&1 && { echo "Release already exists" >&2; exit 1; }
+          created=false
+          release_asset_verified=false
+          cleanup_unverified_release() {
+            code=$?
+            if [ "$created" = true ] && [ "$release_asset_verified" != true ]; then
+              gh release delete "$TAG" --repo Hrampell/espresso-ota --yes --cleanup-tag || true
+            fi
+            exit "$code"
+          }
+          trap cleanup_unverified_release EXIT
+          gh release create "$TAG" "$ARTIFACT" "$SIGNED_MANIFEST" \
+            --repo Hrampell/espresso-ota \
+            --target "$GITHUB_SHA" \
+            --title "$INPUT_BUNDLE_VERSION" \
+            --notes "$INPUT_NOTE" \
+            --latest=false
+          created=true
+          gh release download "$TAG" --repo Hrampell/espresso-ota --pattern "$ARTIFACT" --dir "$RUNNER_TEMP/release-download"
+          node scripts/build-artifact.mjs receipt "$RUNNER_TEMP/release-download/$ARTIFACT" > "$RUNNER_TEMP/release-receipt.json"
+          cmp "$RUNNER_TEMP/artifact-receipt.json" "$RUNNER_TEMP/release-receipt.json"
+          release_asset_verified=true
+          trap - EXIT
+
+      - name: Publish pointer, verify publicly, and rollback on failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_BUNDLE_VERSION: ${{ inputs.bundle_version }}
+        run: |
+          set -euo pipefail
+          SIGNED_MANIFEST="$RUNNER_TEMP/signed-manifest.json"
+          PUBLIC_KEY="$(node -p "require('./config/native-baselines.json').publicKeySpkiBase64")"
+          MANIFEST_URL="https://hrampell.github.io/espresso-ota/v1/production.json"
+          PRIOR_POINTER="$RUNNER_TEMP/previous-production.json"
+          had_pointer=false
+          published=false
+          verified=false
+          if [ -f v1/production.json ]; then
+            cp v1/production.json "$PRIOR_POINTER"
+            had_pointer=true
+          fi
+          rollback_pointer() {
+            if [ "$had_pointer" = true ]; then
+              cp "$PRIOR_POINTER" v1/production.json
+            else
+              rm -f v1/production.json
+            fi
+            git add -A v1/production.json
+            if ! git diff --cached --quiet; then
+              git commit -m "revert: rollback failed OTA $INPUT_BUNDLE_VERSION"
+              git push origin HEAD:main
+            fi
+          }
+          cleanup_pointer() {
+            code=$?
+            if [ "$published" = true ] && [ "$verified" != true ]; then
+              rollback_pointer
+            fi
+            exit "$code"
+          }
+          trap cleanup_pointer EXIT
+          cp "$SIGNED_MANIFEST" v1/production.json
+          git config user.name "espresso-ota-bot"
+          git config user.email "espresso-ota-bot@users.noreply.github.com"
+          git add v1/production.json
+          git commit -m "deploy: $INPUT_BUNDLE_VERSION"
+          git push origin HEAD:main
+          published=true
+          for attempt in $(seq 1 30); do
+            if node scripts/verify-publication.mjs "$MANIFEST_URL" "$PUBLIC_KEY"; then
+              verified=true
+              break
+            fi
+            sleep 10
+          done
+          test "$verified" = true
+          trap - EXIT
