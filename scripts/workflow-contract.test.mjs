@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
+import { verifySignedEnvelope } from "./lib/contract.mjs";
+
 const workflowPath = path.resolve(".github/workflows/deploy-production.yml");
 
 test("production OTA workflow is manual-only and explicitly confirmed", () => {
@@ -43,6 +45,15 @@ test("workflow cannot deploy backend or submit an App Store build", () => {
   assert.doesNotMatch(source, /OTA_SIGNING_PRIVATE_KEY_PEM[^\n]*(?:echo|cat|printf)/u);
 });
 
-test("no production pointer is committed before the updater-enabled native build is live", () => {
-  assert.equal(fs.existsSync(path.resolve("v1/production.json")), false);
+test("the committed production pointer is signed for the updater-enabled native baseline", () => {
+  const baseline = JSON.parse(fs.readFileSync(path.resolve("config/native-baselines.json"), "utf8"));
+  const envelope = JSON.parse(fs.readFileSync(path.resolve("v1/production.json"), "utf8"));
+  const payload = verifySignedEnvelope({
+    envelope,
+    publicKeySpkiBase64: baseline.publicKeySpkiBase64,
+  });
+  assert.equal(payload.nativeCompatibility.version, baseline.nativeVersion);
+  assert.equal(payload.nativeCompatibility.minimumBuild, baseline.nativeBuild);
+  assert.equal(payload.nativeCompatibility.maximumBuild, baseline.nativeBuild);
+  assert.ok(Number.isSafeInteger(payload.sequence) && payload.sequence >= 1);
 });

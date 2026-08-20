@@ -48,6 +48,8 @@ test("verifies the public signed pointer and immutable release bytes", async () 
   await assert.doesNotReject(verifyPublication({
     manifestUrl: "https://hrampell.github.io/espresso-ota/v1/production.json",
     publicKeySpkiBase64: data.publicKeySpkiBase64,
+    expectedBundleVersion: data.payload.bundleVersion,
+    expectedSourceCommit: data.payload.sourceCommit,
     fetcher,
   }));
   assert.equal(requests.length, 2);
@@ -56,6 +58,25 @@ test("verifies the public signed pointer and immutable release bytes", async () 
   assert.ok(requests[0].init.signal instanceof AbortSignal);
   assert.ok(requests[1].init.signal instanceof AbortSignal);
   assert.equal(requests[1].url, data.payload.artifact.url);
+});
+
+test("rejects a previous valid pointer while the expected deployment is still propagating", async () => {
+  const data = fixture();
+  let call = 0;
+  const fetcher = async () => {
+    call += 1;
+    return call === 1
+      ? new Response(data.manifest, { status: 200, headers: { "content-type": "application/json" } })
+      : new Response(data.artifact, { status: 200, headers: { "content-type": "application/zip" } });
+  };
+
+  await assert.rejects(verifyPublication({
+    manifestUrl: "https://hrampell.github.io/espresso-ota/v1/production.json",
+    publicKeySpkiBase64: data.publicKeySpkiBase64,
+    expectedBundleVersion: "1.3.3-ota.4",
+    expectedSourceCommit: "fedcba9876543210fedcba9876543210fedcba98",
+    fetcher,
+  }), /expected deployment/i);
 });
 
 test("rejects wrong artifact bytes and never reports a false success", async () => {
@@ -71,6 +92,8 @@ test("rejects wrong artifact bytes and never reports a false success", async () 
   await assert.rejects(verifyPublication({
     manifestUrl: "https://hrampell.github.io/espresso-ota/v1/production.json",
     publicKeySpkiBase64: data.publicKeySpkiBase64,
+    expectedBundleVersion: data.payload.bundleVersion,
+    expectedSourceCommit: data.payload.sourceCommit,
     fetcher,
   }));
 });
