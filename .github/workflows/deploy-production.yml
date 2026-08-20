@@ -173,6 +173,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_BUNDLE_VERSION: ${{ inputs.bundle_version }}
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail
           SIGNED_MANIFEST="$RUNNER_TEMP/signed-manifest.json"
@@ -214,7 +215,11 @@ jobs:
           git push origin HEAD:main
           published=true
           for attempt in $(seq 1 30); do
-            if node scripts/verify-publication.mjs "$MANIFEST_URL" "$PUBLIC_KEY"; then
+            if node scripts/verify-publication.mjs \
+              "$MANIFEST_URL" \
+              "$PUBLIC_KEY" \
+              "$INPUT_BUNDLE_VERSION" \
+              "$INPUT_SOURCE_SHA"; then
               verified=true
               break
             fi

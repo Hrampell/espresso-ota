@@ -49,9 +49,18 @@ async function readBounded(response, maximumBytes) {
   return Buffer.concat(chunks, total);
 }
 
-export async function verifyPublication({ manifestUrl, publicKeySpkiBase64, fetcher = fetch }) {
+export async function verifyPublication({
+  manifestUrl,
+  publicKeySpkiBase64,
+  expectedBundleVersion,
+  expectedSourceCommit,
+  fetcher = fetch,
+}) {
   if (manifestUrl !== "https://hrampell.github.io/espresso-ota/v1/production.json") {
     throw new Error("Unexpected production manifest URL");
+  }
+  if (typeof expectedBundleVersion !== "string" || typeof expectedSourceCommit !== "string") {
+    throw new Error("Expected deployment identity is required");
   }
   const manifestRequestInit = {
     method: "GET",
@@ -66,6 +75,12 @@ export async function verifyPublication({ manifestUrl, publicKeySpkiBase64, fetc
   const manifestBytes = await readBounded(manifestResponse, OTA_MAX_MANIFEST_BYTES);
   const envelope = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(manifestBytes));
   const payload = verifySignedEnvelope({ envelope, publicKeySpkiBase64 });
+  if (
+    payload.bundleVersion !== expectedBundleVersion
+    || payload.sourceCommit !== expectedSourceCommit
+  ) {
+    throw new Error("Public pointer does not match the expected deployment");
+  }
 
   const artifactResponse = await fetchWithDeadline(fetcher, payload.artifact.url, {
     ...manifestRequestInit,
@@ -79,11 +94,18 @@ export async function verifyPublication({ manifestUrl, publicKeySpkiBase64, fetc
 }
 
 async function main() {
-  const [manifestUrl, publicKeySpkiBase64] = process.argv.slice(2);
-  if (!manifestUrl || !publicKeySpkiBase64) {
-    throw new Error("Usage: verify-publication.mjs <manifest-url> <public-spki-base64>");
+  const [manifestUrl, publicKeySpkiBase64, expectedBundleVersion, expectedSourceCommit] = process.argv.slice(2);
+  if (!manifestUrl || !publicKeySpkiBase64 || !expectedBundleVersion || !expectedSourceCommit) {
+    throw new Error(
+      "Usage: verify-publication.mjs <manifest-url> <public-spki-base64> <bundle-version> <source-commit>",
+    );
   }
-  process.stdout.write(`${JSON.stringify(await verifyPublication({ manifestUrl, publicKeySpkiBase64 }))}\n`);
+  process.stdout.write(`${JSON.stringify(await verifyPublication({
+    manifestUrl,
+    publicKeySpkiBase64,
+    expectedBundleVersion,
+    expectedSourceCommit,
+  }))}\n`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
