@@ -4,8 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   OTA_KEY_ID,
-  OTA_NATIVE_BUILD,
-  OTA_NATIVE_VERSION,
+  OTA_NATIVE_BUILDS,
   validateDeploymentInputs,
   verifySignedEnvelope,
 } from "./lib/contract.mjs";
@@ -31,8 +30,8 @@ function validateBaseline(baseline) {
     baseline.schemaVersion !== 1
     || baseline.appRepository !== "Hrampell/espressoshotlogapp"
     || baseline.releaseBranch !== "main"
-    || baseline.nativeVersion !== OTA_NATIVE_VERSION
-    || baseline.nativeBuild !== OTA_NATIVE_BUILD
+    || !Object.hasOwn(OTA_NATIVE_BUILDS, baseline.nativeVersion)
+    || baseline.nativeBuild !== OTA_NATIVE_BUILDS[baseline.nativeVersion]
     || !/^[0-9a-f]{40}$/u.test(baseline.baselineCommit)
     || baseline.keyId !== OTA_KEY_ID
     || typeof baseline.publicKeySpkiBase64 !== "string"
@@ -43,6 +42,7 @@ function validateBaseline(baseline) {
 export function validateDeployment({ inputs, baseline, currentEnvelope }) {
   const validatedInputs = validateDeploymentInputs(inputs);
   const validatedBaseline = validateBaseline(baseline);
+  if (validatedInputs.bundleVersion !== `${validatedBaseline.nativeVersion}-ota.${validatedInputs.sequence}`) throw new Error('Bundle does not match native baseline');
   if (currentEnvelope === undefined) {
     if (validatedInputs.sequence !== 1) throw new Error("The first production sequence must be 1");
     return validatedInputs.sequence;

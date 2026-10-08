@@ -8,6 +8,7 @@ import {
 export const OTA_KEY_ID = "espresso-ota-p256-2026-01";
 export const OTA_NATIVE_VERSION = "1.3.3";
 export const OTA_NATIVE_BUILD = 11;
+export const OTA_NATIVE_BUILDS = Object.freeze({ '1.3.3': 11, '1.3.4': 12 });
 export const OTA_MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
 export const OTA_MAX_MANIFEST_BYTES = 256 * 1024;
 export const OTA_RELEASE_PREFIX = "https://github.com/Hrampell/espresso-ota/releases/download/";
@@ -54,7 +55,7 @@ export function validateDeploymentInputs(input) {
   assertExactKeys(input, DEPLOYMENT_INPUT_KEYS, "deployment inputs");
   if (!/^[0-9a-f]{40}$/u.test(input.sourceSha ?? "")) throw new Error("Invalid source SHA");
   const sequence = parsePositiveInteger(input.sequence, "sequence");
-  if (input.bundleVersion !== `${OTA_NATIVE_VERSION}-ota.${sequence}`) {
+  if (!Object.keys(OTA_NATIVE_BUILDS).some(version => input.bundleVersion === `${version}-ota.${sequence}`)) {
     throw new Error("Bundle version and sequence do not match");
   }
   if (!KINDS.has(input.kind)) throw new Error("Invalid OTA kind");
@@ -93,14 +94,15 @@ export function validatePayload(payload) {
   if (payload.schemaVersion !== 1 || payload.channel !== "production") throw new Error("Unsupported payload protocol");
   if (typeof payload.sequence !== "number") throw new Error("Payload sequence must be numeric");
   const sequence = parsePositiveInteger(payload.sequence, "payload sequence");
-  if (payload.bundleVersion !== `${OTA_NATIVE_VERSION}-ota.${sequence}`) throw new Error("Invalid bundle version");
+  if (!Object.keys(OTA_NATIVE_BUILDS).some(version => payload.bundleVersion === `${version}-ota.${sequence}`)) throw new Error("Invalid bundle version");
   if (!/^[0-9a-f]{40}$/u.test(payload.sourceCommit)) throw new Error("Invalid source commit");
   if (!KINDS.has(payload.kind)) throw new Error("Invalid payload kind");
   assertExactKeys(payload.nativeCompatibility, ["version", "minimumBuild", "maximumBuild"], "compatibility");
   if (
-    payload.nativeCompatibility.version !== OTA_NATIVE_VERSION
-    || payload.nativeCompatibility.minimumBuild !== OTA_NATIVE_BUILD
-    || payload.nativeCompatibility.maximumBuild !== OTA_NATIVE_BUILD
+    !Object.hasOwn(OTA_NATIVE_BUILDS, payload.nativeCompatibility.version)
+    || payload.bundleVersion !== `${payload.nativeCompatibility.version}-ota.${sequence}`
+    || payload.nativeCompatibility.minimumBuild !== OTA_NATIVE_BUILDS[payload.nativeCompatibility.version]
+    || payload.nativeCompatibility.maximumBuild !== OTA_NATIVE_BUILDS[payload.nativeCompatibility.version]
   ) throw new Error("Invalid native compatibility");
   assertExactKeys(payload.artifact, ["url", "sha256", "sizeBytes"], "artifact");
   if (payload.artifact.url !== expectedArtifactUrl(payload.bundleVersion)) throw new Error("Invalid artifact URL");

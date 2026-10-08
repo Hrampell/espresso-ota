@@ -102,7 +102,7 @@ jobs:
           npm ci
           npm test
           npx tsc -p tsconfig.app.json --noEmit
-          npm run build
+          VITE_ENABLE_VERIFIED_LOCAL_MIGRATION=true npm run build
 
       - name: Build a deterministic bounded bundle
         env:

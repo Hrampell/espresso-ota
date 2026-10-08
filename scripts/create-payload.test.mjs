@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { OTA_NATIVE_BUILDS } from './lib/contract.mjs';
+test('build 12 compatibility is explicit and cannot spill into build 11', () => {
+  assert.equal(OTA_NATIVE_BUILDS['1.3.4'], 12);
+  assert.equal(OTA_NATIVE_BUILDS['1.3.3'], 11);
+  assert.equal(OTA_NATIVE_BUILDS['1.3.5'], undefined);
+});
 
 import { createPayload } from "./create-payload.mjs";
 

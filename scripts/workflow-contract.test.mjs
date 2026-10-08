@@ -52,8 +52,11 @@ test("the committed production pointer is signed for the updater-enabled native 
     envelope,
     publicKeySpkiBase64: baseline.publicKeySpkiBase64,
   });
-  assert.equal(payload.nativeCompatibility.version, baseline.nativeVersion);
-  assert.equal(payload.nativeCompatibility.minimumBuild, baseline.nativeBuild);
-  assert.equal(payload.nativeCompatibility.maximumBuild, baseline.nativeBuild);
+  // During baseline promotion the old signed pointer remains live until the
+  // new artifact is verified. Never rewrite or discard it to pass validation.
+  const retainedPrevious = payload.nativeCompatibility.version === '1.3.3' && baseline.nativeVersion === '1.3.4';
+  assert.equal(payload.nativeCompatibility.version, retainedPrevious ? '1.3.3' : baseline.nativeVersion);
+  assert.equal(payload.nativeCompatibility.minimumBuild, retainedPrevious ? 11 : baseline.nativeBuild);
+  assert.equal(payload.nativeCompatibility.maximumBuild, retainedPrevious ? 11 : baseline.nativeBuild);
   assert.ok(Number.isSafeInteger(payload.sequence) && payload.sequence >= 1);
 });

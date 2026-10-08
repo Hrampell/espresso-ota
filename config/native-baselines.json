@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "appRepository": "Hrampell/espressoshotlogapp",
   "releaseBranch": "main",
-  "nativeVersion": "1.3.3",
-  "nativeBuild": 11,
-  "baselineCommit": "b2123cb83f48f7ab98071a417b7feba4723a6a2e",
+  "nativeVersion": "1.3.4",
+  "nativeBuild": 12,
+  "baselineCommit": "a558055fbdc3d9c2cb3acaa835a4825532c6a71b",
   "keyId": "espresso-ota-p256-2026-01",
   "publicKeySpkiBase64": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEnDJ0vq47wkD+yMdkSrQxp2n6uYfuucojk5K4xEaPYCCS6F/NjANJkD7qEeu1bs71SGmTQ6Y5z7P/EZh0kh3Plg=="
 }

@@ -3,14 +3,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  OTA_NATIVE_BUILD,
-  OTA_NATIVE_VERSION,
+  OTA_NATIVE_BUILDS,
   validateDeploymentInputs,
   validatePayload,
 } from "./lib/contract.mjs";
 
 export function createPayload({ inputs, receipt, publishedAt }) {
   const validated = validateDeploymentInputs(inputs);
+  const nativeVersion = validated.bundleVersion.split('-ota.')[0];
   if (
     !receipt
     || typeof receipt !== "object"
@@ -26,9 +26,9 @@ export function createPayload({ inputs, receipt, publishedAt }) {
     sourceCommit: validated.sourceSha,
     kind: validated.kind,
     nativeCompatibility: {
-      version: OTA_NATIVE_VERSION,
-      minimumBuild: OTA_NATIVE_BUILD,
-      maximumBuild: OTA_NATIVE_BUILD,
+      version: nativeVersion,
+      minimumBuild: OTA_NATIVE_BUILDS[nativeVersion],
+      maximumBuild: OTA_NATIVE_BUILDS[nativeVersion],
     },
     artifact: {
       url: `https://github.com/Hrampell/espresso-ota/releases/download/ota-${validated.bundleVersion}/espresso-shot-log-${validated.bundleVersion}.zip`,

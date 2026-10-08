@@ -53,6 +53,13 @@ test("accepts the first sequence and a strictly newer signed sequence", () => {
   assert.equal(validateDeployment({ inputs: { ...inputs, sequence: "1", bundleVersion: "1.3.3-ota.1" }, baseline }), 1);
   assert.equal(validateDeployment({ inputs, baseline, currentEnvelope: envelopeFor(1) }), 2);
 });
+test("advances from signed build 11 to the verified build 12 baseline without losing sequence protection", () => {
+  const target = { ...baseline, nativeVersion: '1.3.4', nativeBuild: 12 };
+  const next = { ...inputs, bundleVersion: '1.3.4-ota.2' };
+  assert.equal(validateDeployment({ inputs: next, baseline: target, currentEnvelope: envelopeFor(1) }), 2);
+  assert.throws(() => validateDeployment({ inputs, baseline: target, currentEnvelope: envelopeFor(1) }), /baseline/u);
+  assert.throws(() => validateDeployment({ inputs: next, baseline: target, currentEnvelope: envelopeFor(2) }), /newer/u);
+});
 
 test("rejects replay, gaps in trust configuration, and malformed baselines", () => {
   assert.throws(() => validateDeployment({ inputs, baseline, currentEnvelope: envelopeFor(2) }), /newer/u);
